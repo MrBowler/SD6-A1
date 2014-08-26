@@ -3,10 +3,11 @@
 #include <iostream>
 #include <winsock2.h>
 #pragma comment(lib,"ws2_32.lib")
+#pragma warning( disable : 4127 )
 
 
 //-----------------------------------------------------------------------------------------------
-const int MESSAGE_SIZE = 1024;
+const int MESSAGE_MAX_SIZE = 1024;
 
 
 //-----------------------------------------------------------------------------------------------
@@ -26,10 +27,98 @@ std::string GetLowercaseString( const std::string& str )
 
 
 //----------------------------------------------------------------------------------------------------------
-void RunUDP()
+void RunServerUDP()
 {
 	SOCKET sock;
-	struct sockaddr_in sockAddr;
+	sockaddr_in serverAddr;
+	sockaddr_in clientAddr;
+	hostent* hostInfo;
+	char message[ MESSAGE_MAX_SIZE ];
+	std::string portString = "";
+	bool inputGiven;
+	int portNumber = 0;
+	int clientLength = sizeof( clientAddr );
+
+	sock = socket( PF_INET, SOCK_DGRAM, IPPROTO_UDP );
+	if( sock == INVALID_SOCKET )
+	{
+		std::cout << "Socket creation failed!\n";
+		WSACleanup();
+		system("PAUSE");
+		return;
+	}
+
+	inputGiven = false;
+	while( portNumber <= 0 )
+	{
+		if( inputGiven )
+			std::cout << "Please retry inputing the desired port number: ";
+		else
+			std::cout << "Please input the desired port number: ";
+
+		std::getline( std::cin, portString );
+		portNumber = atoi( portString.c_str() );
+		inputGiven = true;
+	}
+
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = htonl( INADDR_ANY );
+	serverAddr.sin_port = htons( (unsigned short) portNumber );
+
+	if( bind( sock, (struct sockaddr *) &serverAddr, sizeof( serverAddr ) ) < 0 )
+	{
+		std::cout << "Failed to bind socket!\n";
+		WSACleanup();
+		system("PAUSE");
+		return;
+	}
+
+	std::cout << "Server is now set up.\n";
+
+	while( true )
+	{
+		memset( message, 0, MESSAGE_MAX_SIZE );
+		if( recvfrom( sock, message, MESSAGE_MAX_SIZE, 0, (struct sockaddr*) &clientAddr, &clientLength ) < 0 )
+		{
+			std::cout << "Failed to receive message!\n";
+			system("PAUSE");
+			break;
+		}
+
+		hostInfo = gethostbyaddr( (const char *) &clientAddr.sin_addr.s_addr, sizeof( clientAddr.sin_addr.s_addr ), AF_INET );
+		if( hostInfo == nullptr )
+		{
+			std::cout << "Failed to get host address!\n";
+			system("PAUSE");
+			break;
+		}
+
+		std::cout << "Received message from " << hostInfo->h_name << " (" << inet_ntoa( clientAddr.sin_addr ) << "): ";
+		std::cout << message << "\n";
+
+		if( sendto( sock, message, MESSAGE_MAX_SIZE, 0, (struct sockaddr*) &clientAddr, clientLength ) < 0 )
+		{
+			std::cout << "Failed to send message!\n";
+			system("PAUSE");
+			break;
+		}
+
+		std::cout << "Message echoed: " << message << "\n";
+	}
+
+	closesocket( sock );
+	WSACleanup();
+}
+
+
+//----------------------------------------------------------------------------------------------------------
+void RunClientUDP()
+{
+	SOCKET sock;
+	sockaddr_in serverAddr;
+	char message[ MESSAGE_MAX_SIZE ];
+	std::string ipAddrString = "";
+	std::string portString = "";
 	bool inputGiven;
 	int portNumber = 0;
 
@@ -43,7 +132,18 @@ void RunUDP()
 	}
 
 	inputGiven = false;
-	std::string portString = "";
+	while( ipAddrString == "" )
+	{
+		if( inputGiven )
+			std::cout << "Please retry inputing the desired IP address: ";
+		else
+			std::cout << "Please input the desired IP address: ";
+
+		std::getline( std::cin, ipAddrString );
+		inputGiven = true;
+	}
+
+	inputGiven = false;
 	while( portNumber <= 0 )
 	{
 		if( inputGiven )
@@ -51,40 +151,58 @@ void RunUDP()
 		else
 			std::cout << "Please input the desired port number: ";
 
-		std::cin >> portString;
+		std::getline( std::cin, portString );
 		portNumber = atoi( portString.c_str() );
 		inputGiven = true;
 	}
 
-	sockAddr.sin_family = AF_INET;
-	sockAddr.sin_addr.s_addr = htonl( INADDR_ANY );
-	sockAddr.sin_port = htons( (unsigned short) portNumber );
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = inet_addr( ipAddrString.c_str() );
+	serverAddr.sin_port = htons( (unsigned short) portNumber );
 
-	if( bind( sock, (struct sockaddr *) &sockAddr, sizeof( sockAddr ) ) < 0 )
+	while( true )
 	{
-		std::cout << "Failed to bind socket!\n";
-		WSACleanup();
-		system("PAUSE");
-		return;
+		memset( message, 0, MESSAGE_MAX_SIZE );
+
+		std::cout << "Enter message: ";
+		std::cin.getline( message, MESSAGE_MAX_SIZE );
+
+		if( sendto( sock, message, MESSAGE_MAX_SIZE, 0, (struct sockaddr*) &serverAddr, sizeof( serverAddr ) ) < 0 )
+		{
+			std::cout << "Failed to send message!\n";
+			system("PAUSE");
+			break;
+		}
+
+		memset( message, 0, MESSAGE_MAX_SIZE );
+		if( recv( sock, message, MESSAGE_MAX_SIZE, 0 ) < 0 )
+		{
+			std::cout << "Failed to receive message!\n";
+			system("PAUSE");
+			break;
+		}
+
+		std::cout << "Server reply: " << message << "\n";
 	}
+
+	closesocket( sock );
+	WSACleanup();
 }
 
 
 //----------------------------------------------------------------------------------------------------------
-void RunTCPServer()
+void RunServerTCP()
 {
 	SOCKET parentSock;
 	SOCKET childSock;
-	struct sockaddr_in serverAddr;
-	struct sockaddr_in clientAddr;
-	struct hostent* hostInfo;
+	sockaddr_in serverAddr;
+	sockaddr_in clientAddr;
+	hostent* hostInfo;
 	bool inputGiven;
-	char message[ MESSAGE_SIZE ];
-	char* hostAddrString;
+	char message[ MESSAGE_MAX_SIZE ];
+	std::string portString = "";
 	int portNumber = 0;
 	int clientLength;
-	int optval;
-	int sizeOfMessage;
 	int queueMaxLength = 5;
 
 	parentSock = socket( AF_INET, SOCK_STREAM, IPPROTO_TCP );
@@ -96,11 +214,7 @@ void RunTCPServer()
 		return;
 	}
 
-	optval = 1;
-	setsockopt( parentSock, SOL_SOCKET, SO_REUSEADDR, (const char *) &optval, sizeof( int ) );
-
 	inputGiven = false;
-	std::string portString = "";
 	while( portNumber <= 0 )
 	{
 		if( inputGiven )
@@ -108,7 +222,7 @@ void RunTCPServer()
 		else
 			std::cout << "Please input the desired port number: ";
 
-		std::cin >> portString;
+		std::getline( std::cin, portString );
 		portNumber = atoi( portString.c_str() );
 		inputGiven = true;
 	}
@@ -136,73 +250,64 @@ void RunTCPServer()
 	std::cout << "Server is now set up.\n";
 
 	clientLength = sizeof( clientAddr );
+	childSock = accept( parentSock, (struct sockaddr *) &clientAddr, &clientLength );
+	if( childSock < 0 )
+	{
+		std::cout << "Failed to accept socket!\n";
+		WSACleanup();
+		system("PAUSE");
+		return;
+	}
+
+	hostInfo = gethostbyaddr( (const char *) &clientAddr.sin_addr.s_addr, sizeof( clientAddr.sin_addr.s_addr ), AF_INET );
+	if( hostInfo == nullptr )
+	{
+		std::cout << "Failed to get host address!\n";
+		WSACleanup();
+		system("PAUSE");
+		return;
+	}
+
+	std::cout << "\nServer established connection with " << hostInfo->h_name << " (" << inet_ntoa( clientAddr.sin_addr ) << ")\n";
+
 	while( true )
 	{
-		childSock = accept( parentSock, (struct sockaddr *) &clientAddr, &clientLength );
-		if( childSock < 0 )
-		{
-			std::cout << "Failed to accept socket!\n";
-			WSACleanup();
-			system("PAUSE");
-			return;
-		}
-		
-		hostInfo = gethostbyaddr( (const char *) &clientAddr.sin_addr.s_addr, sizeof( clientAddr.sin_addr.s_addr ), AF_INET );
-		if( hostInfo == nullptr )
-		{
-			std::cout << "Failed to get host address!\n";
-			WSACleanup();
-			system("PAUSE");
-			return;
-		}
-
-		hostAddrString = inet_ntoa( clientAddr.sin_addr );
-		if( hostAddrString == nullptr )
-		{
-			std::cout << "Failed to get host address string!\n";
-			WSACleanup();
-			system("PAUSE");
-			return;
-		}
-
-		std::cout << "Server established connection with " << hostInfo->h_name << " (" << hostAddrString << ")\n";
-		
-		memset( message, 0, MESSAGE_SIZE );
-		sizeOfMessage = recv( childSock, message, MESSAGE_SIZE, 0 );
-		if( sizeOfMessage < 0 ) 
+		memset( message, 0, MESSAGE_MAX_SIZE );
+		if( recv( childSock, message, MESSAGE_MAX_SIZE, 0 ) < 0 ) 
 		{
 			std::cout << "Failed to receive message!\n";
-			WSACleanup();
 			system("PAUSE");
-			return;
+			break;
 		}
 
-		std::cout << "Server received " << sizeOfMessage << " bytes: " << message << "\n";
+		std::cout << "Message received: " << message << "\n";
 		
-		sizeOfMessage = send( childSock, message, strlen( message ), 0 );
-		if( sizeOfMessage < 0 ) 
+		if( send( childSock, message, strlen( message ), 0 ) < 0 ) 
 		{
 			std::cout << "Failed to send echo!\n";
-			WSACleanup();
 			system("PAUSE");
-			return;
+			break;
 		}
 
-		closesocket( childSock );
+		std::cout << "Message echoed: " << message << "\n";
 	}
+
+	closesocket( parentSock );
+	closesocket( childSock );
+	WSACleanup();
 }
 
 
 //----------------------------------------------------------------------------------------------------------
-void RunTCPClient()
+void RunClientTCP()
 {
 	SOCKET sock;
-	struct sockaddr_in serverAddr;
+	sockaddr_in serverAddr;
 	bool inputGiven;
-	char message[ MESSAGE_SIZE ];
-	char reply[ MESSAGE_SIZE ];
+	char message[ MESSAGE_MAX_SIZE ];
 	std::string ipAddrString = "";
-	u_short portNumber = 0;
+	std::string portString = "";
+	int portNumber = 0;
 
 	sock = socket( AF_INET , SOCK_STREAM , IPPROTO_TCP );
 	if( sock == INVALID_SOCKET )
@@ -221,12 +326,11 @@ void RunTCPClient()
 		else
 			std::cout << "Please input the desired IP address: ";
 
-		std::cin >> ipAddrString;
+		std::getline( std::cin, ipAddrString );
 		inputGiven = true;
 	}
 
 	inputGiven = false;
-	std::string portString = "";
 	while( portNumber <= 0 )
 	{
 		if( inputGiven )
@@ -234,14 +338,16 @@ void RunTCPClient()
 		else
 			std::cout << "Please input the desired port number: ";
 
-		std::cin >> portString;
-		portNumber = (u_short) atoi( portString.c_str() );
+		std::getline( std::cin, portString );
+		portNumber = atoi( portString.c_str() );
 		inputGiven = true;
 	}
 
-	serverAddr.sin_addr.s_addr = inet_addr( ipAddrString.c_str() );
+	std::cout << "\n";
+
 	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_port = htons( portNumber );
+	serverAddr.sin_addr.s_addr = inet_addr( ipAddrString.c_str() );
+	serverAddr.sin_port = htons( (unsigned short) portNumber );
 
 	if( connect( sock, (struct sockaddr *) &serverAddr, sizeof( serverAddr ) ) < 0 )
 	{
@@ -253,30 +359,31 @@ void RunTCPClient()
 
 	while( true )
 	{
+		memset( message, 0, MESSAGE_MAX_SIZE );
+
 		std::cout << "Enter message: ";
-		std::cin >> message;
+		std::cin.getline( message, MESSAGE_MAX_SIZE );
 
 		if( send( sock, message, strlen( message ), 0 ) < 0 )
 		{
 			std::cout << "Failed to send message!\n";
-			WSACleanup();
 			system("PAUSE");
-			return;
+			break;
 		}
 
-		memset( reply, 0, MESSAGE_SIZE );
-		if( recv( sock, reply, MESSAGE_SIZE, 0 ) < 0 )
+		memset( message, 0, MESSAGE_MAX_SIZE );
+		if( recv( sock, message, MESSAGE_MAX_SIZE, 0 ) < 0 )
 		{
 			std::cout << "Failed to receive reply!\n";
-			WSACleanup();
 			system("PAUSE");
-			return;
+			break;
 		}
 
-		std::cout << reply << "\n";
+		std::cout << "Server reply: " << message << "\n";
 	}
 
 	closesocket( sock );
+	WSACleanup();
 }
 
 
@@ -284,6 +391,8 @@ void RunTCPClient()
 int main( int, char* )
 {
 	bool inputGiven;
+	std::string networkType = "";
+	std::string clientOrServer = "";
 	WSADATA wsaDt;
 
 	if( WSAStartup( 0x202, &wsaDt ) != 0 )
@@ -295,7 +404,6 @@ int main( int, char* )
 	}
 
 	inputGiven = false;
-	std::string networkType = "";
 	while( networkType != "tcp" && networkType != "udp" )
 	{
 		if( inputGiven )
@@ -303,118 +411,39 @@ int main( int, char* )
 		else
 			std::cout << "Do you want \'TCP\' or \'UDP\': ";
 
-		std::cin >> networkType;
+		std::getline( std::cin, networkType );
 		networkType = GetLowercaseString( networkType );
 		inputGiven = true;
 	}
 
+
+	inputGiven = false;
+	while( clientOrServer != "server" && clientOrServer != "client" )
+	{
+		if( inputGiven )
+			std::cout << "Please input either \'server\' or \'clients\': ";
+		else
+			std::cout << "Do you want \'server\' or \'client\': ";
+
+		std::getline( std::cin, clientOrServer );
+		clientOrServer = GetLowercaseString( clientOrServer );
+		inputGiven = true;
+	}
+
 	if( networkType == "udp" )
-		RunUDP();
+	{
+		if( clientOrServer == "server" )
+			RunServerUDP();
+		else if( clientOrServer == "client" )
+			RunClientUDP();
+	}
 	else if( networkType == "tcp" )
 	{
-		inputGiven = false;
-		std::string clientOrServer = "";
-		while( clientOrServer != "server" && clientOrServer != "client" )
-		{
-			if( inputGiven )
-				std::cout << "Please input either \'server\' or \'clients\': ";
-			else
-				std::cout << "Do you want \'server\' or \'client\': ";
-
-			std::cin >> clientOrServer;
-			clientOrServer = GetLowercaseString( clientOrServer );
-			inputGiven = true;
-		}
-
 		if( clientOrServer == "server" )
-			RunTCPServer();
+			RunServerTCP();
 		else if( clientOrServer == "client" )
-			RunTCPClient();
+			RunClientTCP();
 	}
 
-	return 0;
-}
-
-
-//----------------------------------------------------------------------------------------------------------
-int main2(void)
-{
-	WSADATA WsaDat;
-	if(WSAStartup(MAKEWORD(2,2),&WsaDat)!=0)
-	{
-		std::cout<<"Winsock error - Winsock initialization failed\r\n";
-		WSACleanup();
-		system("PAUSE");
-		return 0;
-	}
-
-	// Create our socket
-
-	SOCKET Socket=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
-	if(Socket==INVALID_SOCKET)
-	{
-		std::cout<<"Winsock error - Socket creation Failed!\r\n";
-		WSACleanup();
-		system("PAUSE");
-		return 0;
-	}
-
-	// Resolve IP address for hostname
-	struct hostent *host;
-	if((host=gethostbyname("129.119.228.206"))==NULL)
-	{
-		std::cout<<"Failed to resolve hostname.\r\n";
-		WSACleanup();
-		system("PAUSE");
-		return 0;
-	}
-
-	// Setup our socket address structure
-	SOCKADDR_IN SockAddr;
-	SockAddr.sin_port=htons(5000);
-	SockAddr.sin_family=AF_INET;
-	SockAddr.sin_addr.s_addr=*((unsigned long*)host->h_addr);
-
-	// Attempt to connect to server
-	/*if(connect(Socket,(SOCKADDR*)(&SockAddr),sizeof(SockAddr))!=0)
-	{
-		std::cout<<"Failed to establish connection with server\r\n";
-		WSACleanup();
-		system("PAUSE");
-		return 0;
-	}*/
-
-	// If iMode!=0, non-blocking mode is enabled.
-	u_long iMode=1;
-	ioctlsocket(Socket,FIONBIO,&iMode);
-
-	// Main loop
-	for( int i=0; i < 1; ++i )
-	{
-		// Display message from server
-		//char buffer[1000];
-		//memset(buffer,0,999);
-		//int inDataLength=recv(Socket,buffer,1000,0);
-		//std::cout<<buffer;
-		sendto( Socket, "JD Tomlinson", 12, 0, (struct sockaddr*) &SockAddr, sizeof( SockAddr ) );
-
-		int nError=WSAGetLastError();
-		if(nError!=WSAEWOULDBLOCK&&nError!=0)
-		{
-			std::cout<<"Winsock error code: "<<nError<<"\r\n";
-			std::cout<<"Server disconnected!\r\n";
-			// Shutdown our socket
-			shutdown(Socket,SD_SEND);
-
-			// Close our socket entirely
-			closesocket(Socket);
-
-			break;
-		}
-		Sleep(1000);
-	}
-
-	WSACleanup();
-	system("PAUSE");
 	return 0;
 }
